@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+*.class
+.claude/
+.agents/
+.intellijPlatform/
+.kotlin/
+.idea/

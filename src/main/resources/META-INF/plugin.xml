@@ -1,0 +1,38 @@
+<idea-plugin>
+    <id>io.github.ohsoou.trans-md</id>
+    <name>Trans MD</name>
+    <vendor email="soouleaf@gmail.com">ohsoou</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.intellij.plugins.markdown</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+            serviceImplementation="io.github.ohsoou.transmd.settings.TransMdSettings"/>
+        <applicationService
+            serviceImplementation="io.github.ohsoou.transmd.service.TranslationCache"/>
+
+        <applicationConfigurable
+            parentId="tools"
+            instance="io.github.ohsoou.transmd.settings.TransMdSettingsConfigurable"
+            id="io.github.ohsoou.transmd.settings.TransMdSettingsConfigurable"
+            displayName="Markdown Translator"/>
+
+        <fileEditorProvider
+            implementation="io.github.ohsoou.transmd.editor.TranslatedPreviewFileEditorProvider"/>
+    </extensions>
+
+    <actions>
+        <group id="TransMd.ToolbarGroup">
+            <action id="TransMd.TranslateAction"
+                    class="io.github.ohsoou.transmd.action.TranslateMarkdownAction"
+                    text="Translate"
+                    description="Translate Markdown preview to the configured target language"/>
+            <action id="TransMd.RefreshAction"
+                    class="io.github.ohsoou.transmd.action.RefreshTranslationAction"
+                    text="Refresh Translation"
+                    description="Re-translate the current Markdown file"/>
+            <add-to-group group-id="Markdown.Toolbar.Right" anchor="last"/>
+        </group>
+    </actions>
+</idea-plugin>
