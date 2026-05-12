@@ -4,6 +4,8 @@ A JetBrains IDE plugin that adds one-click translation to the Markdown preview.
 
 Open any `.md` file and switch to the **Translated Preview** tab — the content is translated via Google Translate and rendered as HTML side-by-side with the source editor.
 
+<img width="1339" height="754" alt="Image" src="https://github.com/user-attachments/assets/2aa167ff-d952-4218-bc8a-b46a9976f9eb" />
+
 ## Features
 
 - **Translated Preview tab** — appears next to the default Preview tab for every `.md` file
