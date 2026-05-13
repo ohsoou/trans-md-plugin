@@ -20,6 +20,7 @@ dependencies {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion"))
         bundledPlugin("org.intellij.plugins.markdown")
         testFramework(TestFrameworkType.Platform)
+        pluginVerifier()
     }
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.commonmark:commonmark:0.23.0")
@@ -84,5 +85,11 @@ intellijPlatform {
                 <li>API key stored in OS keychain</li>
             </ul>
         """.trimIndent()
+    }
+
+    pluginVerification {
+        ides {
+            recommended()
+        }
     }
 }
