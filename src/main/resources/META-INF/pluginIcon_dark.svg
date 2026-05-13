@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Tentacles -->
+    <path d="M140 320C90 300 70 360 110 370C150 380 170 350 180 330"
+          fill="#FFE44D"/>
+    <path d="M372 320C422 300 442 360 402 370C362 380 342 350 332 330"
+          fill="#FFE44D"/>
+
+    <!-- Body -->
+    <ellipse cx="256" cy="220" rx="150" ry="145" fill="#FFE033"/>
+    <rect x="106" y="220" width="300" height="140" rx="70" fill="#FFE033"/>
+
+    <!-- Eyes -->
+    <circle cx="205" cy="220" r="18" fill="#111111"/>
+    <circle cx="307" cy="220" r="18" fill="#111111"/>
+
+    <!-- Eye Highlights -->
+    <circle cx="199" cy="214" r="6" fill="white"/>
+    <circle cx="301" cy="214" r="6" fill="white"/>
+
+    <!-- Smile -->
+    <path d="M230 270C245 285 267 285 282 270"
+          stroke="#B87200"
+          stroke-width="10"
+          stroke-linecap="round"/>
+
+</svg>
