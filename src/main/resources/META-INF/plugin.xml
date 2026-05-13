@@ -16,7 +16,7 @@
             parentId="tools"
             instance="io.github.ohsoou.transmd.settings.TransMdSettingsConfigurable"
             id="io.github.ohsoou.transmd.settings.TransMdSettingsConfigurable"
-            displayName="Markdown Translator"/>
+            displayName="Trans Md"/>
 
         <fileEditorProvider
             implementation="io.github.ohsoou.transmd.editor.TranslatedPreviewFileEditorProvider"/>

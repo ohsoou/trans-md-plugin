@@ -1,7 +1,7 @@
 # ADR-0001: commonmark-java를 플러그인에 번들, 내부 intellij.markdown 라이브러리 미사용
 
 Date: 2026-05-12  
-Status: Accepted
+Status: Superseded by ADR-0007
 
 ## Context
 

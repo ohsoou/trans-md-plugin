@@ -1,4 +1,4 @@
-# PRD: Markdown Translator — JetBrains Plugin
+# PRD: Trans Md — JetBrains Plugin
 
 Status: ready-for-agent
 
@@ -33,7 +33,7 @@ JetBrains 플러그인 "Trans MD"는 Markdown 미리보기 툴바에 번역 버�
 13. As a user, I want YAML/TOML front matter to remain untranslated, so that metadata fields are not corrupted.
 14. As a user, I want large Markdown files to be translated in sections (split by headings), so that translation works reliably on long documents.
 15. As a user, I want to see an inline error message with a "Open Settings" link when my API key is missing or invalid, so that I know exactly what to fix without searching through menus.
-16. As a user, I want to configure my Google Translate API key in Settings → Tools → Markdown Translator, so that I can provide my own API credentials.
+16. As a user, I want to configure my Google Translate API key in Settings → Tools → Trans Md, so that I can provide my own API credentials.
 17. As a user, I want my API key to be stored securely using the OS keychain, so that it is not exposed in plaintext config files.
 18. As a user, I want the plugin to work in IntelliJ IDEA, PyCharm, WebStorm, GoLand, and all other JetBrains IDEs, so that I don't need to install different plugins for different IDEs.
 19. As a user, I want the plugin to work on IDE version 2023.3 and later, so that I don't need to upgrade my IDE to use the plugin.
@@ -99,7 +99,7 @@ interface TranslationService {
 - Exposes `getInstance()` companion for access from any component
 
 **TransMdSettingsConfigurable** (Settings UI)
-- Path: Settings → Tools → Markdown Translator
+- Path: Settings → Tools → Trans Md
 - Fields: Google Translate API key (password field), target language dropdown
 - "Test Connection" button: translates a short test string and shows success/failure inline
 
