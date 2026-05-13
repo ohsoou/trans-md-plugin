@@ -1,6 +1,6 @@
 package io.github.ohsoou.transmd.editor
 
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.fileEditor.FileEditorState
 import com.intellij.openapi.project.Project
@@ -8,33 +8,28 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.jcef.JBCefApp
-import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.util.ui.UIUtil
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileDocumentManager
-import com.intellij.openapi.options.ShowSettingsUtil
 import io.github.ohsoou.transmd.service.MarkdownPreprocessor
-import io.github.ohsoou.transmd.service.TranslationCache
-import io.github.ohsoou.transmd.service.impl.GoogleTranslateService
-import io.github.ohsoou.transmd.service.impl.TranslationException
+import io.github.ohsoou.transmd.service.TranslationJob
+import io.github.ohsoou.transmd.service.TranslationJobFailure
+import io.github.ohsoou.transmd.service.TranslationJobState
+import io.github.ohsoou.transmd.render.CommonmarkRenderer
+import io.github.ohsoou.transmd.render.FallbackMarkdownRenderer
+import io.github.ohsoou.transmd.render.JetBrainsPreviewRenderer
 import io.github.ohsoou.transmd.settings.TransMdSettings
-import io.github.ohsoou.transmd.settings.TransMdSettingsConfigurable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
-import org.cef.browser.CefBrowser
-import org.cef.browser.CefFrame
-import org.cef.handler.CefRequestHandlerAdapter
-import org.cef.network.CefRequest
-import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
-import org.commonmark.ext.gfm.tables.TablesExtension
-import org.commonmark.parser.Parser
-import org.commonmark.renderer.html.HtmlRenderer
+import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanel
+import org.intellij.plugins.markdown.ui.preview.jcef.MarkdownJCEFHtmlPanel
+import java.awt.CardLayout
 import java.awt.BorderLayout
 import java.awt.Color
 import java.beans.PropertyChangeListener
@@ -43,34 +38,69 @@ import javax.swing.JPanel
 import javax.swing.JSplitPane
 import javax.swing.JTextPane
 
+internal object SwingHtmlFallbackDocument {
+    fun wrap(body: String, backgroundHex: String, foregroundHex: String): String = """
+        <html>
+        <body bgcolor="$backgroundHex" text="$foregroundHex">
+        $body
+        </body>
+        </html>
+    """.trimIndent()
+}
+
 class TranslatedPreviewFileEditor(
     private val project: Project,
-    private val file: VirtualFile
+    private val file: VirtualFile,
+    private val translationJob: TranslationJob
 ) : UserDataHolderBase(), FileEditor {
+    companion object {
+        private val LOG = Logger.getInstance(TranslatedPreviewFileEditor::class.java)
+        private const val JETBRAINS_PREVIEW_CARD = "jetbrains-preview"
+        private const val HTML_FALLBACK_CARD = "html-fallback"
+    }
 
     private val scope = CoroutineScope(Dispatchers.Main)
-    private var translationJob: Job? = null
+    private var activeJob: Job? = null
 
-    private val useJcef = JBCefApp.isSupported()
-    private val browser: JBCefBrowser? = if (useJcef) JBCefBrowser() else null
-    private val textPane: JTextPane? = if (!useJcef) {
-        JTextPane().apply { contentType = "text/html"; isEditable = false }
-    } else null
+    private val textPane = JTextPane().apply {
+        contentType = "text/html"
+        isEditable = false
+    }
+    private val previewStack = JPanel(CardLayout())
+    private var markdownPanel: MarkdownHtmlPanel? = null
+    private val renderer = FallbackMarkdownRenderer(
+        primary = JetBrainsPreviewRenderer(file, project),
+        fallback = CommonmarkRenderer()
+    )
 
-    private val sourceEditor: com.intellij.openapi.editor.Editor? = run {
-        val document = FileDocumentManager.getInstance().getDocument(file)
-        if (document != null) EditorFactory.getInstance().createEditor(document, project) else null
+    private var sourceEditor: com.intellij.openapi.editor.Editor? = null
+
+    init {
+        previewStack.add(textPane, HTML_FALLBACK_CARD)
+        showPreviewCard(HTML_FALLBACK_CARD)
     }
 
     val panel: JPanel = object : JPanel(BorderLayout()) {
         override fun addNotify() {
             super.addNotify()
             if (componentCount == 0) {
-                val previewComponent = browser?.component ?: textPane!!
+                val doc = FileDocumentManager.getInstance().getDocument(file)
+                sourceEditor = if (doc != null) EditorFactory.getInstance().createEditor(doc, project) else null
+
+                val primaryPanel = createPrimaryPreviewPanel()
+                markdownPanel = primaryPanel
+                if (primaryPanel != null) {
+                    previewStack.add(primaryPanel.component, JETBRAINS_PREVIEW_CARD)
+                    showPreviewCard(JETBRAINS_PREVIEW_CARD)
+                } else {
+                    renderer.forceFallback()
+                }
+
+                val previewComponent = previewStack
                 if (sourceEditor != null) {
                     val split = JSplitPane(
                         JSplitPane.HORIZONTAL_SPLIT,
-                        sourceEditor.component,
+                        sourceEditor!!.component,
                         previewComponent
                     ).apply { resizeWeight = 0.5 }
                     add(split, BorderLayout.CENTER)
@@ -81,164 +111,173 @@ class TranslatedPreviewFileEditor(
         }
     }
 
-    private val mdParser: Parser
-    private val mdRenderer: HtmlRenderer
-
-    init {
-        val extensions = listOf(TablesExtension.create(), StrikethroughExtension.create())
-        mdParser = Parser.builder().extensions(extensions).build()
-        mdRenderer = HtmlRenderer.builder().extensions(extensions).build()
-
-        browser?.jbCefClient?.addRequestHandler(object : CefRequestHandlerAdapter() {
-            override fun onBeforeBrowse(
-                browser: CefBrowser, frame: CefFrame, request: CefRequest,
-                userGesture: Boolean, isRedirect: Boolean
-            ): Boolean {
-                if (request.url == "trans-md://settings") {
-                    ApplicationManager.getApplication().invokeLater {
-                        ShowSettingsUtil.getInstance().showSettingsDialog(project, TransMdSettingsConfigurable::class.java)
-                    }
-                    return true
-                }
-                return request.url.startsWith("trans-md://")
-            }
-        }, browser.cefBrowser)
-    }
-
     override fun selectNotify() {
         startTranslation()
     }
 
     fun startTranslation() {
-        translationJob?.cancel()
-        translationJob = scope.launch {
+        activeJob?.cancel()
+        activeJob = scope.launch {
             runTranslationJob()
         }
     }
 
-    private fun loadApiKey(): String? {
+    private suspend fun loadApiKey(): String? = runInterruptible(Dispatchers.IO) {
         val attrs = CredentialAttributes("io.github.ohsoou.transmd", "google-translate-api-key")
-        return PasswordSafe.instance.getPassword(attrs)
+        PasswordSafe.instance.getPassword(attrs)
     }
 
     private suspend fun runTranslationJob() {
         val apiKey = loadApiKey()
-        if (apiKey.isNullOrBlank()) {
-            loadHtml(errorHtml(
-                "API 키가 설정되지 않았습니다.",
-                "Settings → Markdown Translator에서 Google Translate API 키를 입력하세요.",
-                showSettingsLink = true
-            ))
-            return
-        }
-
         val rawText = runInterruptible(Dispatchers.IO) {
             String(file.contentsToByteArray(), Charsets.UTF_8)
         }
-
         val targetLang = TransMdSettings.getInstance().targetLang
-        val cache = ApplicationManager.getApplication().getService(TranslationCache::class.java)
-        val cacheKey = rawText.hashCode()
 
-        val cached = cache?.get(cacheKey, targetLang)
-        if (cached != null) {
-            loadHtml(renderMarkdown(cached))
-            return
-        }
-
-        val preprocessed = MarkdownPreprocessor.preprocess(rawText)
-        val chunks = MarkdownPreprocessor.splitIntoChunks(preprocessed.sanitized)
-        val total = chunks.size
-        val translated = StringBuilder()
-        val service = GoogleTranslateService(apiKey)
-
-        for ((index, chunk) in chunks.withIndex()) {
-            loadHtml(loadingHtml(index + 1, total))
-            val result = service.translate(chunk, targetLang)
-            result.onFailure { e ->
-                val message = when {
-                    e is TranslationException && e.httpCode == 403 ->
-                        "API 키가 유효하지 않거나 할당량을 초과했습니다."
-                    e is TranslationException && e.httpCode == 429 ->
-                        "번역 할당량을 초과했습니다. 잠시 후 다시 시도하세요."
-                    else -> e.message ?: "알 수 없는 오류가 발생했습니다."
-                }
-                loadHtml(errorHtml("번역에 실패했습니다.", message))
-                return
+        translationJob.run(rawText, targetLang, apiKey).collect { state ->
+            when (state) {
+                is TranslationJobState.Translating -> showStatus(loadingHtml(state.currentChunk, state.totalChunks))
+                is TranslationJobState.Succeeded -> displayMarkdown(state.translatedMarkdown)
+                is TranslationJobState.Failed -> showStatus(errorHtml(state.reason))
             }
-            translated.append(result.getOrThrow())
-            if (index < chunks.lastIndex) translated.append("\n\n")
+        }
+    }
+
+    private suspend fun showStatus(html: String) = withContext(Dispatchers.Main) {
+        try {
+            textPane.contentType = "text/html"
+            textPane.text = wrapFallbackHtml(html)
+            textPane.caretPosition = 0
+        } catch (t: Throwable) {
+            LOG.warn("Status HTML preview failed, using plain text fallback.", t)
+            textPane.contentType = "text/plain"
+            textPane.text = html
+        }
+        showPreviewCard(HTML_FALLBACK_CARD)
+    }
+
+    private suspend fun loadHtml(html: String): Boolean = withContext(Dispatchers.Main) {
+        val panel = markdownPanel
+        if (!renderer.isUsingFallback && panel != null) {
+            try {
+                panel.setHtml(html, 0, file)
+                showPreviewCard(JETBRAINS_PREVIEW_CARD)
+                return@withContext true
+            } catch (t: Throwable) {
+                if (t !is Exception && t !is LinkageError) throw t
+                forceFallback("JetBrains Markdown preview panel failed, switching to CommonMark fallback.", t)
+            }
         }
 
-        val restored = MarkdownPreprocessor.restore(translated.toString(), preprocessed.placeholders)
-        val html = renderMarkdown(MarkdownPreprocessor.stripFrontMatter(restored))
-        cache?.put(cacheKey, targetLang, html)
-        loadHtml(html)
+        try {
+            textPane.contentType = "text/html"
+            textPane.text = wrapFallbackHtml(html)
+            textPane.caretPosition = 0
+        } catch (t: Throwable) {
+            LOG.warn("Fallback HTML preview failed, using plain text fallback.", t)
+            textPane.contentType = "text/plain"
+            textPane.text = html
+        }
+        showPreviewCard(HTML_FALLBACK_CARD)
+        false
     }
 
-    private suspend fun loadHtml(html: String) = withContext(Dispatchers.Main) {
-        browser?.loadHTML(wrapHtml(html)) ?: run { textPane?.text = wrapHtml(html) }
+    private suspend fun displayMarkdown(markdown: String) {
+        val stripped = MarkdownPreprocessor.stripFrontMatter(markdown)
+        val html = renderMarkdown(stripped)
+        val renderedWithFallback = renderer.isUsingFallback
+        val shownInPrimary = loadHtml(html)
+        if (!shownInPrimary && !renderedWithFallback && renderer.isUsingFallback) {
+            loadHtml(renderer.render(stripped))
+        }
     }
 
-    private fun renderMarkdown(markdown: String): String {
-        val document = mdParser.parse(markdown)
-        return mdRenderer.render(document)
+    private suspend fun renderMarkdown(markdown: String): String {
+        val wasUsingFallback = renderer.isUsingFallback
+        val rendered = try {
+            renderer.render(markdown)
+        } catch (t: Throwable) {
+            if (t !is Exception && t !is LinkageError) throw t
+            forceFallback("JetBrains Markdown renderer failed, switching to CommonMark fallback.", t)
+            renderer.render(markdown)
+        }
+        if (!wasUsingFallback && renderer.isUsingFallback) {
+            forceFallback(
+                "JetBrains Markdown renderer failed, switching to CommonMark fallback.",
+                renderer.lastFailure
+            )
+        }
+        return rendered
     }
 
-    private fun Color.isDark() = (red * 0.299 + green * 0.587 + blue * 0.114) < 128
-    private fun Color.toCss() = "rgb($red,$green,$blue)"
-
-    private fun wrapHtml(body: String): String {
-        val bg = UIUtil.getPanelBackground()
-        val fg = UIUtil.getLabelForeground().toCss()
-        val isDark = bg.isDark()
-        val codeBg = if (isDark) Color(bg.red + 15, bg.green + 15, bg.blue + 15) else Color(bg.red - 15, bg.green - 15, bg.blue - 15)
-        val borderColor = if (isDark) "rgb(70,70,70)" else "rgb(220,220,220)"
-        val errorBg = if (isDark) "rgb(80,60,20)" else "rgb(255,243,205)"
-        val errorBorder = if (isDark) "rgb(120,90,30)" else "rgb(255,193,7)"
-        val linkColor = if (isDark) "rgb(88,166,255)" else "rgb(0,102,204)"
-
-        return """
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="UTF-8">
-              <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                       padding: 16px 24px; max-width: 860px; margin: 0 auto;
-                       line-height: 1.6; color: $fg; background: $bg; font-size: 14px; }
-                h1 { font-size: 1.75em; } h2 { font-size: 1.4em; } h3 { font-size: 1.15em; }
-                code { background: $codeBg; border-radius: 3px; padding: 2px 5px;
-                       font-family: 'JetBrains Mono', monospace; font-size: 0.9em; color: $fg; }
-                pre  { background: $codeBg; border-radius: 6px; padding: 12px 16px; overflow-x: auto; }
-                pre code { background: none; padding: 0; }
-                blockquote { border-left: 4px solid $borderColor; margin: 0;
-                             padding-left: 16px; color: $fg; opacity: 0.75; }
-                table { border-collapse: collapse; width: 100%; }
-                th, td { border: 1px solid $borderColor; padding: 8px 12px; }
-                th { background: $codeBg; }
-                a { color: $linkColor; }
-                hr { border: none; border-top: 1px solid $borderColor; }
-                .trans-md-error { background: $errorBg; border: 1px solid $errorBorder;
-                                  border-radius: 6px; padding: 12px 16px; margin: 16px 0; color: $fg; }
-              </style>
-            </head>
-            <body>$body</body>
-            </html>
-        """.trimIndent()
+    private fun createPrimaryPreviewPanel(): MarkdownHtmlPanel? {
+        if (!JBCefApp.isSupported()) {
+            return null
+        }
+        return try {
+            MarkdownJCEFHtmlPanel(project, file)
+        } catch (t: Throwable) {
+            if (t !is Exception && t !is LinkageError) throw t
+            forceFallback("JetBrains Markdown preview is unavailable, using CommonMark fallback.", t)
+            null
+        }
     }
+
+    private fun showPreviewCard(card: String) {
+        (previewStack.layout as CardLayout).show(previewStack, card)
+    }
+
+    private fun forceFallback(message: String, t: Throwable? = null) {
+        if (!renderer.isUsingFallback) {
+            renderer.forceFallback()
+        }
+        if (t != null) {
+            LOG.warn(message, t)
+        } else {
+            LOG.warn(message)
+        }
+    }
+
+    private fun wrapFallbackHtml(body: String): String {
+        val bgColor = toHex(UIUtil.getPanelBackground())
+        val fgColor = toHex(UIUtil.getLabelForeground())
+        return SwingHtmlFallbackDocument.wrap(body, bgColor, fgColor)
+    }
+
+    private fun toHex(color: Color): String = "#%02x%02x%02x".format(color.red, color.green, color.blue)
 
     private fun loadingHtml(current: Int, total: Int) =
         "<p>⏳ 번역 중... ($current/$total 섹션)</p>"
 
+    private fun errorHtml(failure: TranslationJobFailure): String = when (failure) {
+        TranslationJobFailure.MissingApiKey -> errorHtml(
+            "API 키가 설정되지 않았습니다.",
+            "Settings → Trans Md에서 Google Translate API 키를 입력하세요.",
+            showSettingsLink = true
+        )
+        TranslationJobFailure.PermissionDenied -> errorHtml(
+            "번역에 실패했습니다.",
+            "API 키가 유효하지 않거나 할당량을 초과했습니다."
+        )
+        TranslationJobFailure.QuotaExceeded -> errorHtml(
+            "번역에 실패했습니다.",
+            "번역 할당량을 초과했습니다. 잠시 후 다시 시도하세요."
+        )
+        is TranslationJobFailure.ProviderFailure -> errorHtml("번역에 실패했습니다.", failure.message)
+        is TranslationJobFailure.UnexpectedFailure -> errorHtml(
+            "번역에 실패했습니다.",
+            failure.cause.message ?: "알 수 없는 오류가 발생했습니다."
+        )
+    }
+
     private fun errorHtml(title: String, detail: String, showSettingsLink: Boolean = false): String {
-        val link = if (showSettingsLink) """<br><a href="trans-md://settings">⚙ 설정 열기</a>""" else ""
+        val link = if (showSettingsLink) "<br><small>Settings → Trans Md에서 설정을 열 수 있습니다.</small>" else ""
         return """<div class="trans-md-error"><strong>⚠️ $title</strong><br><small>$detail$link</small></div>"""
     }
 
     override fun getComponent(): JComponent = panel
     override fun getPreferredFocusedComponent(): JComponent =
-        sourceEditor?.contentComponent ?: browser?.component ?: textPane!!
+        sourceEditor?.contentComponent ?: markdownPanel?.component ?: textPane
     override fun getName(): String = "Translated Preview"
     override fun getFile(): VirtualFile = file
     override fun getState(level: com.intellij.openapi.fileEditor.FileEditorStateLevel) = FileEditorState.INSTANCE
@@ -248,8 +287,8 @@ class TranslatedPreviewFileEditor(
     override fun addPropertyChangeListener(listener: PropertyChangeListener) {}
     override fun removePropertyChangeListener(listener: PropertyChangeListener) {}
     override fun dispose() {
-        translationJob?.cancel()
+        activeJob?.cancel()
         sourceEditor?.let { EditorFactory.getInstance().releaseEditor(it) }
-        browser?.let { Disposer.dispose(it) }
+        markdownPanel?.let { Disposer.dispose(it) }
     }
 }

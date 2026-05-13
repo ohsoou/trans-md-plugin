@@ -60,8 +60,9 @@ TranslatedPreviewFileEditor  (JSplitPane: left = source editor, right = translat
         ├─ 2. Split by heading boundaries          → List<Chunk>
         ├─ 3. GoogleTranslateService.translate()   per chunk (sequential)
         ├─ 4. MarkdownPreprocessor.restore()       → full translated Markdown
-        ├─ 5. commonmark-java render               → HTML
-        └─ 6. JBCefBrowser.loadHTML()              [EDT]
+        ├─ 5. JetBrains preview render             → preferred HTML fragment
+        │    └─ fallback: commonmark-java render
+        └─ 6. MarkdownJCEFHtmlPanel.setHtml()      [EDT]
 ```
 
 ## Tech Stack
@@ -70,7 +71,8 @@ TranslatedPreviewFileEditor  (JSplitPane: left = source editor, right = translat
 |---------|---------|
 | [IntelliJ Platform SDK](https://plugins.jetbrains.com/docs/intellij/) | Plugin framework |
 | [OkHttp 4](https://square.github.io/okhttp/) | HTTP client for Google Translate API |
-| [commonmark-java](https://github.com/commonmark/commonmark-java) | Markdown → HTML rendering |
+| JetBrains bundled Markdown plugin | Preferred preview rendering to match the built-in Markdown preview |
+| [commonmark-java](https://github.com/commonmark/commonmark-java) | Stable fallback renderer when internal preview APIs break |
 | [Gson](https://github.com/google/gson) | JSON parsing for API responses |
 
 ## Development
