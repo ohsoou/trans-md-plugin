@@ -1,6 +1,8 @@
 package io.github.ohsoou.transmd.service.impl
 
 import com.google.gson.JsonParser
+import io.github.ohsoou.transmd.service.TranslationProviderFailure
+import io.github.ohsoou.transmd.service.TranslationProviderResult
 import io.github.ohsoou.transmd.service.TranslationService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,9 +19,9 @@ class GoogleTranslateService(private val apiKey: String) : TranslationService {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun translate(text: String, targetLang: String): Result<String> =
+    override suspend fun translate(text: String, targetLang: String): TranslationProviderResult =
         withContext(Dispatchers.IO) {
-            runCatching {
+            try {
                 val body = """{"q":${gson(text)},"target":"$targetLang","format":"text"}"""
 
                 val request = Request.Builder()
@@ -31,11 +33,18 @@ class GoogleTranslateService(private val apiKey: String) : TranslationService {
                 val responseBody = response.body?.string() ?: ""
 
                 if (!response.isSuccessful) {
-                    val errorMsg = parseErrorMessage(responseBody, response.code)
-                    throw TranslationException(response.code, errorMsg)
+                    return@withContext when (response.code) {
+                        403 -> TranslationProviderResult.Failed(TranslationProviderFailure.PermissionDenied)
+                        429 -> TranslationProviderResult.Failed(TranslationProviderFailure.QuotaExceeded)
+                        else -> TranslationProviderResult.Failed(
+                            TranslationProviderFailure.NetworkError(parseErrorMessage(responseBody, response.code))
+                        )
+                    }
                 }
 
-                parseTranslatedText(responseBody)
+                TranslationProviderResult.Succeeded(parseTranslatedText(responseBody))
+            } catch (e: Exception) {
+                TranslationProviderResult.Failed(TranslationProviderFailure.UnexpectedError(e))
             }
         }
 
@@ -70,14 +79,7 @@ class GoogleTranslateService(private val apiKey: String) : TranslationService {
                 .getAsJsonObject("error")
                 .get("message").asString
         } catch (_: Exception) {
-            when (code) {
-                400 -> "잘못된 요청입니다. API 키와 언어 설정을 확인하세요."
-                403 -> "API 키가 유효하지 않거나 결제 계정이 연결되지 않았습니다."
-                429 -> "번역 할당량을 초과했습니다. 잠시 후 다시 시도하세요."
-                else -> "번역 서버 오류 (HTTP $code)"
-            }
+            "번역 서버 오류 (HTTP $code)"
         }
     }
 }
-
-class TranslationException(val httpCode: Int, message: String) : Exception(message)
