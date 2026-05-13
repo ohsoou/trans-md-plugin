@@ -45,9 +45,10 @@ intellijPlatform {
             email = providers.gradleProperty("pluginVendorEmail")
         }
         ideaVersion {
-            sinceBuild = "233"
+            sinceBuild = "243"
         }
         description = """
+            <img src="https://github.com/user-attachments/assets/2aa167ff-d952-4218-bc8a-b46a9976f9eb" width="800"/>
             <h2>Trans Md</h2>
             <p>Adds one-click translation to the JetBrains Markdown preview, powered by Google Translate.</p>
             <h3>Features</h3>
@@ -64,6 +65,26 @@ intellijPlatform {
             <h3>Requirements</h3>
             <ul>
                 <li>Google Translate API key with the Cloud Translation API enabled</li>
+            </ul>
+
+            <hr/>
+
+            <h2>Trans Md</h2>
+            <p>Google Translate 기반으로 JetBrains Markdown 미리보기에 원클릭 번역 기능을 추가합니다.</p>
+            <h3>기능</h3>
+            <ul>
+                <li>기본 Markdown 미리보기 옆에 번역 미리보기 탭 추가 — 별도 창 불필요</li>
+                <li>소스 에디터와 번역 미리보기를 하나의 분할 패널에서 나란히 표시</li>
+                <li>Markdown 툴바에 번역(Translate) 및 새로고침(Refresh) 버튼 직접 추가</li>
+                <li>대용량 파일도 안정적으로 처리하기 위해 청크 단위로 번역</li>
+                <li>코드 블록, 인라인 코드, URL, 프런트 매터, 수식 블록($$)은 번역하지 않고 그대로 유지</li>
+                <li>세션 내 번역 결과를 캐시하여 불필요한 API 호출 방지</li>
+                <li>API 키는 IDE 자격증명 저장소를 통해 OS 키체인에 안전하게 보관</li>
+                <li>Settings → Tools → Trans Md에서 대상 언어 설정 가능</li>
+            </ul>
+            <h3>요구사항</h3>
+            <ul>
+                <li>Cloud Translation API가 활성화된 Google Translate API 키</li>
             </ul>
         """.trimIndent()
 
