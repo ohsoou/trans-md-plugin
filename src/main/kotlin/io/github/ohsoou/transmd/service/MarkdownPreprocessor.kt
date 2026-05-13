@@ -10,6 +10,7 @@ object MarkdownPreprocessor {
 
     private val FRONT_MATTER_REGEX = Regex("^---\\s*\\n.*?\\n---\\s*\\n", RegexOption.DOT_MATCHES_ALL)
     private val FENCED_CODE_REGEX = Regex("```[\\s\\S]*?```|~~~[\\s\\S]*?~~~")
+    private val BLOCK_MATH_REGEX = Regex("\\$\\$[\\s\\S]*?\\$\\$")
     private val INLINE_CODE_REGEX = Regex("`[^`\\n]+`")
     // Matches the URL part in [text](URL) and bare <URL> autolinks
     private val MARKDOWN_LINK_URL_REGEX = Regex("\\[([^\\]]*)]\\(([^)]+)\\)")
@@ -37,6 +38,9 @@ object MarkdownPreprocessor {
 
         // Fenced code blocks before inline code to avoid double-matching
         result = FENCED_CODE_REGEX.replace(result) { placeholder(it.value) }
+
+        // Math blocks should survive translation unchanged so the preview renderer can process them.
+        result = BLOCK_MATH_REGEX.replace(result) { placeholder(it.value) }
 
         // Inline code spans
         result = INLINE_CODE_REGEX.replace(result) { placeholder(it.value) }

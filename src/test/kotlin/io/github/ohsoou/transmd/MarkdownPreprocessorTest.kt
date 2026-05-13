@@ -49,6 +49,24 @@ class MarkdownPreprocessorTest {
     }
 
     @Test
+    fun `block math is replaced with placeholder`() {
+        val text = """
+            Before
+
+            $$
+            E = mc^2
+            $$
+
+            After
+        """.trimIndent()
+        val doc = MarkdownPreprocessor.preprocess(text)
+
+        assertFalse(doc.sanitized.contains("E = mc^2"))
+        assertTrue(doc.sanitized.contains("__PLACEHOLDER_"))
+        assertTrue(doc.placeholders.values.any { it.contains("E = mc^2") })
+    }
+
+    @Test
     fun `url in markdown link is replaced but link text is preserved`() {
         val text = "See [the docs](https://example.com/docs) for more."
         val doc = MarkdownPreprocessor.preprocess(text)
